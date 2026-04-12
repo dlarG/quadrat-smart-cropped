@@ -10,22 +10,23 @@ import io
 import uuid
 import shutil
 import gc
-import torch
 
 app = Flask(__name__)
 CORS(app)
 
-torch.backends.cudnn.benchmark = False
-if torch.cuda.is_available():
-    torch.cuda.empty_cache()
+
+# Set environment variables for memory optimization
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
 
 MODEL_PATH = os.path.join('models', 'best.pt')
 model = YOLO(MODEL_PATH)
 
 UPLOAD_DIR = 'uploads'
 OUTPUT_DIR = 'outputs'
+MASKS_DIR = 'masks'
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(MASKS_DIR, exist_ok=True)
 
 def order_points(pts):
     #Order points in clockwise order starting from top-left
@@ -165,7 +166,6 @@ def detect_and_rectify_quadrats(image_path, conf_threshold=0.25):
                             points = np.float32(box_points)
                             method_used = "min_area_rect"
                             success = True
-                        
                         if success:
                             rectified = four_point_transform(original_img, points)
                             
@@ -192,7 +192,7 @@ def detect_and_rectify_quadrats(image_path, conf_threshold=0.25):
                                         'width': rectified.shape[1],
                                         'height': rectified.shape[0]
                                     },
-                                    'contour_area': float(contour_area)
+                                    'contour_area': float(contour_area),
                                 })
                                 
                                 print(f"Successfully processed quadrat {i+1}")
@@ -211,19 +211,13 @@ def detect_and_rectify_quadrats(image_path, conf_threshold=0.25):
             del masks
         if 'boxes' in locals() and boxes is not None:
             del boxes
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        
+
         return rectified_data, annotated_base64
-        
+
     except Exception as e:
         print(f"Error in detect_and_rectify_quadrats: {str(e)}")
         # Clean up memory even on error
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        raise e
 
 @app.route('/api/upload', methods=['POST'])
 def upload_image():
@@ -286,8 +280,6 @@ def upload_image():
         
         # Clean up memory on error
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
             
         return jsonify({'error': f'Processing failed: {str(e)}'}), 500
 
